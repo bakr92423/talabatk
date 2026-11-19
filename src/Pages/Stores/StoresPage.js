@@ -32,7 +32,7 @@ const StoresPage = () => {
 
     useEffect(()=>{
          getStore()
-    },[])
+    },[typeSlug])
 
 
   return (
