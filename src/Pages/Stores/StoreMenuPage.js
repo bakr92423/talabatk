@@ -21,16 +21,73 @@ const StoreMenuPage = () => {
   const [showClearModal, setShowClearModal] = useState(false);
   const [pendingProduct, setPendingProduct] = useState(null);
   const [pendingVariant, setPendingVariant] = useState(null);
-  // الجديد: المنتج اللي هنختار حجمه
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  // دالة تجيب مفتاح السلة - لو فيه حجم يبقى productId__size
+  // === الجديد: ويندو عرض الصنف ===
+  const [viewProduct, setViewProduct] = useState(null);
+  const [modalQty, setModalQty] = useState(1);
+  const [modalNote, setModalNote] = useState('');
+  const [modalVariant, setModalVariant] = useState(null);
+
+  const openProductModal = (product) => {
+    setViewProduct(product);
+    setModalQty(1);
+    setModalNote('');
+    // لو ليه أحجام اختار أول حجم افتراضي
+    setModalVariant(product?.variants?.length > 0 ? product.variants[0] : null);
+  };
+
+  const closeProductModal = () => {
+    setViewProduct(null);
+    setModalQty(1);
+    setModalNote('');
+    setModalVariant(null);
+  };
+
+  // سعر الصنف اللي في الويندو
+  const getModalPrice = () => {
+    if (!viewProduct) return 0;
+    if (modalVariant) return Number(modalVariant?.priceAfterDiscount || modalVariant?.price || 0);
+    return Number(viewProduct?.priceAfterDiscount || viewProduct?.price || 0);
+  };
+
+  // إضافة من داخل الويندو بالكمية والملاحظة
+  const addFromModal = () => {
+    if (!viewProduct) return;
+    const productId = viewProduct._id || viewProduct.id;
+    const variant = modalVariant;
+    const realStoreId = viewProduct?.store?._id || viewProduct?.store;
+    const cartKey = getCartKey(productId, variant);
+
+    // جهز الملاحظة - هنحفظها مع الصنف لو عندك notes في السلة
+    // لو مش عندك نظام ملاحظات في السلة، الملاحظة هتتخزن هنا مؤقتا
+    const noteToSave = modalNote.trim();
+
+    if (!cartData.storeId || cartData.storeId === slug) {
+      setCartData(prev => ({
+        ...prev,
+        storeId: slug,
+        storeName: slug,
+        storeDbId: realStoreId,
+        items: { ...prev.items, [cartKey]: (prev.items[cartKey] || 0) + modalQty },
+        // خزن الملاحظات لو حابب تستخدمها في صفحة السلة / الطلب
+        notes: { ...(prev.notes || {}), [cartKey]: noteToSave }
+      }));
+      closeProductModal();
+    } else {
+      setPendingProduct(productId);
+      setPendingVariant(variant);
+      // هنحتاج نضيف الكمية بعد المسح - خزنها مؤقتا
+      setPendingProduct({ id: productId, qty: modalQty, variant, note: noteToSave });
+      setShowClearModal(true);
+    }
+  };
+
   const getCartKey = (productId, variant) => {
     if (!variant) return productId
     return `${productId}__${variant.size}`
   }
 
-  // دالة تجيب سعر المنتج حسب الحجم
   const getPriceForKey = (product, cartKey) => {
     if (!cartKey.includes('__')) return Number(product?.price || 0)
     const size = cartKey.split('__')[1]
@@ -38,24 +95,19 @@ const StoreMenuPage = () => {
     return Number(variant?.priceAfterDiscount || variant?.price || product?.price || 0)
   }
 
-  // ده اهم useEffect - بيحفظ السلة والتوتال للـ Nav لحظيا
   useEffect(() => {
     localStorage.setItem('talabat_cart', JSON.stringify(cartData));
-    
-    // احسب التوتال من المنتجات الموجودة - بالحجم
     const total = Object.entries(cartData.items).reduce((sum, [key, qty]) => {
       const productId = key.split('__')[0]
       const pr = products.find(p => (p._id || p.id) == productId);
       return sum + (pr ? getPriceForKey(pr, key) * qty : 0);
     }, 0);
-    
     localStorage.setItem('talabat_cart_total', total);
     window.dispatchEvent(new Event('storage'));
   }, [cartData, products]);
 
   const cart = cartData.items;
 
-  // دالة تجيب كمية منتج معين - مجموع كل أحجامه
   const getProductQty = (productId) => {
     return Object.entries(cart).reduce((sum, [key, qty]) => {
       if (key === productId || key.startsWith(productId + '__')) return sum + qty
@@ -65,15 +117,12 @@ const StoreMenuPage = () => {
 
   const addToCart = (productId, variant = null) => {
     const product = products.find(p => p._id === productId)
-    // لو المنتج ليه أحجام ومفيش variant مختار، افتح نافذة الاختيار
     if (product?.variants?.length > 0 && !variant) {
       setSelectedProduct(product)
       return
     }
-
     const realStoreId = product?.store?._id || product?.store
     const cartKey = getCartKey(productId, variant)
-    
     if (!cartData.storeId || cartData.storeId === slug) {
       setCartData(prev => ({
         ...prev,
@@ -91,14 +140,10 @@ const StoreMenuPage = () => {
   };
 
   const removeFromCart = (productId, variant = null) => {
-    // لو المنتج ليه أحجام، هننقص من آخر حجم اتضاف - أو نفتح النافذة
-    // للتبسيط: لو ليه أحجام، بنفتح نافذة الاختيار عشان يختار هينقص من انهي حجم
     const product = products.find(p => p._id === productId)
     if (product?.variants?.length > 0 && !variant) {
-      // هنقص من أول حجم موجود في السلة
       const keys = Object.keys(cart).filter(k => k.startsWith(productId + '__'))
       if (keys.length === 0) return
-      // لو فيه حجم واحد بس، نقص منه على طول
       if (keys.length === 1) {
         const key = keys[0]
         setCartData(prev => {
@@ -110,11 +155,9 @@ const StoreMenuPage = () => {
         });
         return
       }
-      // لو أكتر من حجم، افتح النافذة وخليه يختار
       setSelectedProduct(product)
       return
     }
-
     const cartKey = getCartKey(productId, variant)
     setCartData(prev => {
       const newItems = { ...prev.items };
@@ -131,16 +174,28 @@ const StoreMenuPage = () => {
   };
 
   const confirmClearCart = () => {
-    const cartKey = getCartKey(pendingProduct, pendingVariant)
-    setCartData({
-      storeId: slug,
-      storeName: slug,
-      items: { [cartKey]: 1 }
-    });
+    // لو جاي من ويندو الصنف
+    if (pendingProduct && typeof pendingProduct === 'object') {
+      const cartKey = getCartKey(pendingProduct.id, pendingProduct.variant)
+      setCartData({
+        storeId: slug,
+        storeName: slug,
+        items: { [cartKey]: pendingProduct.qty || 1 },
+        notes: { [cartKey]: pendingProduct.note || '' }
+      });
+    } else {
+      const cartKey = getCartKey(pendingProduct, pendingVariant)
+      setCartData({
+        storeId: slug,
+        storeName: slug,
+        items: { [cartKey]: 1 }
+      });
+    }
     setShowClearModal(false);
     setPendingProduct(null);
     setPendingVariant(null);
     setSelectedProduct(null)
+    closeProductModal();
   };
 
   const filteredProducts = products.filter(p=>p.isActive !== false && (  selectedCat === "الكل" || p.category?.name === selectedCat));
@@ -175,7 +230,7 @@ const StoreMenuPage = () => {
             const hasVariants = product.variants && product.variants.length > 0
             const displayPrice = hasVariants ? Math.min(...product.variants.map(v => Number(v.price))) : product.price
             return (
-              <div key={productId} className="product-card col-6 col-md-4 col-lg-2  mb-2 ">
+              <div key={productId} className="product-card col-6 col-md-4 col-lg-2 mb-2" onClick={() => openProductModal(product)} style={{cursor:'pointer'}}>
                 <div className="product-img">
                   <img src={product.img || product.image} alt={product.name} />
                 </div>
@@ -183,9 +238,9 @@ const StoreMenuPage = () => {
                 <p className="price">{hasVariants ? `من ${displayPrice} جنيه` : `${product.price} جنيه`}</p>
                 
                 {qty === 0 ? (
-                  <button className="add-btn" onClick={() => addToCart(productId)}>{hasVariants ? 'اختر الحجم +' : 'إضافة +'}</button>
+                  <button className="add-btn" onClick={(e) => { e.stopPropagation(); addToCart(productId); }}>{hasVariants ? 'اختر الحجم +' : 'إضافة +'}</button>
                 ) : (
-                  <div className="qty-control">
+                  <div className="qty-control" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => addToCart(productId)}>+</button>
                     <span>{qty}</span>
                     <button onClick={() => removeFromCart(productId)}>-</button>
@@ -197,7 +252,63 @@ const StoreMenuPage = () => {
         </div>
       </div>
 
-      {/* نافذة اختيار الحجم */}
+      {/* === ويندو عرض الصنف - زي الصورة بالظبط === */}
+      {viewProduct && (
+        <div className="product-modal-overlay" onClick={closeProductModal}>
+          <div className="product-modal" onClick={(e) => e.stopPropagation()} dir="rtl">
+            <button className="product-modal-close" onClick={closeProductModal}>✕</button>
+            
+            <div className="product-modal-img">
+              <img src={viewProduct.img || viewProduct.image} alt={viewProduct.name} />
+            </div>
+
+            <div className="product-modal-body">
+              <h2>{viewProduct.name}</h2>
+              <p className="product-modal-desc">{viewProduct.description || viewProduct.desc || ''}</p>
+
+              {/* اختيار الحجم لو موجود */}
+              {viewProduct.variants?.length > 0 && (
+                <div className="product-modal-variants">
+                  {viewProduct.variants.map((v, i) => (
+                    <button
+                      key={i}
+                      className={`variant-btn ${modalVariant?.size === v.size ? 'active' : ''}`}
+                      onClick={() => setModalVariant(v)}
+                    >
+                      {v.size} - {v.price} ج
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="product-modal-note-row">
+                <span>لديك ملاحظات إضافية؟</span>
+                <button type="button" onClick={() => document.getElementById('product-note-input')?.focus()}>أضف ملاحظة</button>
+              </div>
+              <input
+                id="product-note-input"
+                className="product-modal-note-input"
+                value={modalNote}
+                onChange={(e) => setModalNote(e.target.value)}
+                placeholder="مثال: من غير بصل..."
+              />
+
+              <div className="product-modal-footer">
+                <div className="product-modal-qty">
+                  <button onClick={() => setModalQty(q => q + 1)}>+</button>
+                  <span>{modalQty}</span>
+                  <button onClick={() => setModalQty(q => Math.max(1, q - 1))}>−</button>
+                </div>
+                <button className="product-modal-add" onClick={addFromModal}>
+                  أضف ... {(getModalPrice() * modalQty).toFixed(2)} ج.م
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة اختيار الحجم القديمة - لزرار + السريع */}
       {selectedProduct && (
         <div className="modal-overlay" onClick={()=>setSelectedProduct(null)}>
           <div className="modal-box" onClick={(e)=>e.stopPropagation()} dir="rtl">
@@ -239,7 +350,7 @@ const StoreMenuPage = () => {
             <h3>تغيير المطعم؟</h3>
             <p>عندك منتجات في سلة {cartData.storeName}، لو كملت السلة القديمة هتتمسح.</p>
             <div className="modal-actions">
-              <button className="cancel-btn" onClick={() => {setShowClearModal(false); setPendingVariant(null)}}>إلغاء</button>
+              <button className="cancel-btn" onClick={() => {setShowClearModal(false); setPendingVariant(null); setPendingProduct(null)}}>إلغاء</button>
               <button className="confirm-btn" onClick={confirmClearCart}>امسح وضيف</button>
             </div>
           </div>
