@@ -10,6 +10,18 @@ const StoreMenuPage = () => {
   const [loading, setLoading] = useState(true);
   const URL='https://talabatak-ebon.vercel.app'
 
+  // === الجديد: تظبيط صور Cloudinary ===
+  // بيحول أي لينك Cloudinary لـ w_800,q_auto,f_auto لوحده
+  // لو الصورة مش Cloudinary بيرجعها زي ما هي
+  const getOptimizedImage = (url, width = 800) => {
+    if (!url || typeof url !== 'string') return url;
+    if (!url.includes('res.cloudinary.com')) return url;
+    // لو متظبطة أصلاً، متكررهاش
+    if (url.includes('q_auto') || url.includes('/w_')) return url;
+    // حط التحويل بعد /upload/
+    return url.replace('/upload/', `/upload/w_${width},q_auto,f_auto/`);
+  };
+
   const [cartData, setCartData] = useState(() => {
     try {
       const saved = localStorage.getItem('talabat_cart');
@@ -232,7 +244,12 @@ const StoreMenuPage = () => {
             return (
               <div key={productId} className="product-card col-6 col-md-4 col-lg-2 mb-2" onClick={() => openProductModal(product)} style={{cursor:'pointer'}}>
                 <div className="product-img">
-                  <img src={product.img || product.image} alt={product.name} />
+                  <img 
+                    src={getOptimizedImage(product.img || product.image, 800)} 
+                    alt={product.name} 
+                    loading="lazy"
+                    decoding="async"
+                  />
                 </div>
                 <h3>{product.name}</h3>
                 <p className="price">{hasVariants ? `من ${displayPrice} جنيه` : `${product.price} جنيه`}</p>
@@ -259,7 +276,7 @@ const StoreMenuPage = () => {
             <button className="product-modal-close" onClick={closeProductModal}>✕</button>
             
             <div className="product-modal-img">
-              <img src={viewProduct.img || viewProduct.image} alt={viewProduct.name} />
+              <img src={getOptimizedImage(viewProduct.img || viewProduct.image, 1000)} alt={viewProduct.name} />
             </div>
 
             <div className="product-modal-body">
