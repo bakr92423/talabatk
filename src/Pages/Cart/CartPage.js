@@ -1,3 +1,4 @@
+
 import axios from 'axios';
 import React, { useEffect, useState } from 'react'
 
@@ -18,7 +19,6 @@ const CartPage = () => {
     }
   });
 
-  console.log(cartData,"cartData");
   const getNameStore=async()=>{
     if(!cartData.storeDbId) return
     const getData=await axios.get(`${URL}/api/store/${cartData.storeDbId}`)
@@ -30,7 +30,6 @@ const CartPage = () => {
     getNameStore()
   },[])
   
-
   const [step, setStep] = useState('cart');
   const [fullName, setFullName] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -42,16 +41,14 @@ const CartPage = () => {
   const token=localStorage.getItem("token")
   let decoded=null
   try{
-    if(token){
+    if(token && token !== 'temp_token'){
       const payload=token.split(".")[1]
-   decoded=JSON.parse(atob(payload))
+      decoded=JSON.parse(atob(payload))
     }
   }catch(e){
     decoded=null
   }
   
-  // --- الجديد: تحويل السلة لسطور، كل سطر = منتج + حجم ---
-  // cartKey = productId أو productId__size
   const getCartLines = () => {
     return Object.entries(cartData.items).map(([cartKey, qty]) => {
       const [pid, size] = cartKey.split('__')
@@ -74,7 +71,6 @@ const CartPage = () => {
         setLoading(true);
         const res = await axios.get(`${URL}/api/store/${cartData.storeId}/products`);
         const allProducts = res.data.data;
-        // هات المنتجات اللي الـ id بتاعها موجود في أي مفتاح سلة
         const idsInCart = Object.keys(cartData.items).map(k => k.split('__')[0])
         const inCart = allProducts.filter(p => {
           const pid = p._id || p.id;
@@ -101,7 +97,12 @@ const CartPage = () => {
         }
       }
       fetchZones();
+      // الاسم والتليفون يتملوا اوتوماتيك لو متسجلين قبل كده
+      setFullName(localStorage.getItem('name') || '');
       setPhone(localStorage.getItem('userPhone') || '');
+      // العنوان والمنطقة يفضلوا فاضيين كل مرة
+      setAddress('');
+      setSelectedZone(null);
     }
   },[step]);
 
@@ -152,25 +153,30 @@ const CartPage = () => {
     if(!regPhone) return alert('دخل رقم التلفون');
     try{
       const res = await axios.post(`${URL}/api/register`, { name: fullName, phone: regPhone });
-      localStorage.setItem('token', res.data.token);
+      if(res.data.token) localStorage.setItem('token', res.data.token);
       localStorage.setItem('userPhone', regPhone);
       localStorage.setItem('name', fullName);
       setStep('checkout');
     }catch(err){
-      localStorage.setItem('token', 'temp_token');
+      // لو التسجيل فشل، كمل كضيف من غير temp_token
+      localStorage.removeItem('token');
       localStorage.setItem('userPhone', regPhone);
+      localStorage.setItem('name', fullName);
       setStep('checkout');
     }
   };
 
   const handleCreateOrder = async () => {
-    if(!address || !phone || !selectedZone) return alert('كمل البيانات');
+    // التحقق: لو الاسم فاضي يقوله اكتب الاسم، ولو التليفون فاضي يقوله اكتب رقم التليفون
+    if(!fullName || fullName.trim() === "") return alert('اكتب الاسم');
+    if(!phone || phone.trim() === "") return alert('اكتب رقم التليفون');
+    if(!address || !selectedZone) return alert('كمل البيانات');
+
     try {
       setOrdering(true);
       const token = localStorage.getItem('token');
       let realStoreId = cartData.storeDbId
 
-      // جهز المنتجات - مع الحجم
       const orderItems = cartLines.map(line => ({
         product: line.pid,
         quantity: line.qty,
@@ -180,9 +186,19 @@ const CartPage = () => {
         name: line.size ? `${line.product.name} - ${line.size}` : line.product.name
       }));
 
+      // التوكن اختياري: لو فيه توكن ابعته، لو مفيش متبعتوش ومتفشلش
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (token && token !== 'temp_token') {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const { data } = await axios.post(`${URL}/api/order`, {
         store: realStoreId,
-        user:decoded.id,
+        user: decoded?.id || null,
+        customerName: fullName,
+        name: fullName,
         orderItems,
         totalOrder: total,
         deliveryFee: deliveryFee,
@@ -190,19 +206,18 @@ const CartPage = () => {
         phone,
         status:"pending",
         location: selectedZone._id || selectedZone.id
-      }, {
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        }
-      });
+      }, { headers });
+
+      // احفظ الاسم والتليفون للمرة الجاية، من غير العنوان والمنطقة
+      localStorage.setItem('name', fullName);
+      localStorage.setItem('userPhone', phone);
 
       alert(`تم الطلب بنجاح من ${storeOrdered.name} بقيمة ${total} جنيه انتظر مكالمة خلال دقائق `);
       clearCart();
       setStep('cart');
     } catch(err) {
       console.log(err.response?.data || err);
-      alert(err.response?.data?.message || "فشل ارسال الطلب");
+      alert(err.response?.data?.message || "  مافيش طلب");
     } finally {
       setOrdering(false);
     }
@@ -241,6 +256,7 @@ const CartPage = () => {
       <div className="cart-page-wrapper">
         <div className="cart-container">
           <h2 className="cart-title mb-4">متابعة الطلب</h2>
+          <input className="form-control mb-3 p-3" placeholder="الاسم ثلاثي" value={fullName} onChange={e=>setFullName(e.target.value)} />
           <input className="form-control mb-3 p-3" placeholder="العنوان" value={address} onChange={e=>setAddress(e.target.value)} />
           <input className="form-control mb-3 p-3" placeholder="رقم التلفون" value={phone} onChange={e=>setPhone(e.target.value)} />
           
@@ -313,9 +329,7 @@ const CartPage = () => {
         </div>
 
         <button className="btn btn-checkout w-100 mt-4" onClick={() => {
-          const token = localStorage.getItem('token');
-          if(!token) setStep('register');
-          else setStep('checkout');
+          setStep('checkout');
         }}>التالي</button>
       </div>
     </div>
